@@ -887,6 +887,10 @@ impl VsCodeSettings {
                 "unicode" => Some(ProjectPanelSortOrder::Unicode),
                 _ => None,
             }),
+            sort_by: self.read_enum("explorer.sortOrder", |s| match s {
+                "modified" => Some(ProjectPanelSortBy::ModifiedTime),
+                _ => None,
+            }),
             starts_open: None,
             sticky_scroll: None,
             auto_open: None,

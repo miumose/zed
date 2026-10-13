@@ -6093,6 +6093,25 @@ fn panels_page() -> SettingsPage {
                 files: USER,
             }),
             SettingsPageItem::SettingItem(SettingItem {
+                title: "Sort By",
+                description: "Whether to sort entries in the project panel by name or by modification time (newest first).",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("project_panel.sort_by"),
+                    pick: |settings_content| {
+                        settings_content.project_panel.as_ref()?.sort_by.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .project_panel
+                            .get_or_insert_default()
+                            .sort_by = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
                 title: "Auto Open Files On Create",
                 description: "Whether to automatically open newly created files in the editor.",
                 field: Box::new(SettingField {

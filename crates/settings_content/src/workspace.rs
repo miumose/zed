@@ -905,6 +905,12 @@ pub struct ProjectPanelSettingsContent {
     ///
     /// Default: default
     pub sort_order: Option<ProjectPanelSortOrder>,
+    /// Which property to sort sibling entries by in the project panel.
+    /// This works in combination with `sort_mode`, which still controls how files and
+    /// directories are grouped.
+    ///
+    /// Default: name
+    pub sort_by: Option<ProjectPanelSortBy>,
     /// Whether to show error and warning count badges next to file names in the project panel.
     ///
     /// Default: false
@@ -1052,6 +1058,30 @@ pub enum ProjectPanelSortOrder {
     /// Pure Unicode codepoint comparison. No case folding, no natural number sorting.
     /// Uppercase ASCII sorts before lowercase. Accented characters sort after ASCII.
     Unicode,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    PartialEq,
+    Eq,
+    strum::VariantArray,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectPanelSortBy {
+    /// Sort entries by name, as configured by `sort_order`.
+    #[default]
+    Name,
+    /// Sort entries by modification time, most recently modified first.
+    /// Entries with the same modification time are sorted by name.
+    ModifiedTime,
 }
 
 impl From<ProjectPanelSortMode> for util::paths::SortMode {
