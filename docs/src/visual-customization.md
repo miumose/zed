@@ -516,6 +516,8 @@ TBD: Centered layout related settings
     // "lower":   Lowercase names grouped before uppercase, natural sort within.
     // "unicode":  Pure Unicode codepoint comparison, no case folding.
     "sort_order": "default",
+    // Sort entries by name or by modification time, newest first (name, modified_time)
+    "sort_by": "name",
     // Whether to hide the root entry when only one folder is open in the window;
     // this also affects how file paths appear in the file finder history.
     "hide_root": false,

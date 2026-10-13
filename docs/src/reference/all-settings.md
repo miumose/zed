@@ -5668,6 +5668,7 @@ Available variables:
       "show": "always"
     },
     "sort_mode": "directories_first",
+    "sort_by": "name",
     "hide_root": false,
     "hide_hidden": false,
     "starts_open": true,
@@ -6010,6 +6011,34 @@ Available variables:
 {
   "project_panel": {
     "sort_order": "unicode"
+  }
+}
+```
+
+### Sort By
+
+- Description: Which property to sort sibling entries by in the project panel. This setting works in combination with `sort_mode`, which still controls how files and directories are grouped.
+- Setting: `sort_by`
+- Default: `name`
+
+**Options**
+
+1. Sort entries by name, as configured by `sort_order`.
+
+```json [settings]
+{
+  "project_panel": {
+    "sort_by": "name"
+  }
+}
+```
+
+2. Sort entries by modification time, most recently modified first. Entries with the same modification time are sorted by name.
+
+```json [settings]
+{
+  "project_panel": {
+    "sort_by": "modified_time"
   }
 }
 ```

@@ -181,6 +181,13 @@ The `project_panel.sort_order` setting controls name comparison:
 - `"lower"` — lowercase names grouped first, then uppercase.
 - `"unicode"` — raw Unicode codepoint order with no case folding.
 
+The `project_panel.sort_by` setting controls which property siblings are sorted by:
+
+- `"name"` (default) — sort by name, as configured by `sort_order`.
+- `"modified_time"` — sort by modification time, most recently modified first.
+  Grouping from `sort_mode` still applies, and entries with the same
+  modification time are sorted by name.
+
 ## Other Actions
 
 - {#action project_panel::RevealInFileManager} ({#kb
