@@ -11756,7 +11756,7 @@ async fn test_sort_by_modified_time(cx: &mut gpui::TestAppContext) {
         &[
             "v root",
             "    > b_dir",
-            "    v a_dir",
+            "    v a_dir  <== selected",
             "          x.txt",
             "          y.txt",
             "      b.txt",
@@ -11774,7 +11774,7 @@ async fn test_sort_by_modified_time(cx: &mut gpui::TestAppContext) {
         &[
             "v root",
             "    > b_dir",
-            "    v a_dir",
+            "    v a_dir  <== selected",
             "          y.txt",
             "          x.txt",
             "      c.txt",
@@ -11801,7 +11801,7 @@ async fn test_sort_by_modified_time(cx: &mut gpui::TestAppContext) {
             "      b.txt",
             "      a.txt",
             "    > b_dir",
-            "    v a_dir",
+            "    v a_dir  <== selected",
             "          y.txt",
             "          x.txt",
         ]
@@ -11824,7 +11824,7 @@ async fn test_sort_by_modified_time(cx: &mut gpui::TestAppContext) {
             "      a.txt",
             "      b.txt",
             "      c.txt",
-            "    v a_dir",
+            "    v a_dir  <== selected",
             "          x.txt",
             "          y.txt",
             "    > b_dir",

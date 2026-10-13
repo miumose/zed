@@ -4,8 +4,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{
     DockSide, FolderIndicator, IntoGpui, ProjectPanelEntrySpacing, ProjectPanelSortBy,
-    ProjectPanelSortMode, ProjectPanelSortOrder, ProjectPanelTitleTooltipDelay, RegisterSetting, Settings,
-    ShowDiagnostics, ShowIndentGuides,
+    ProjectPanelSortMode, ProjectPanelSortOrder, ProjectPanelTitleTooltipDelay, RegisterSetting,
+    Settings, ShowDiagnostics, ShowIndentGuides,
 };
 use ui::scrollbars::{ScrollbarVisibility, ShowScrollbar};
 
