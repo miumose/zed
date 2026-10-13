@@ -11698,6 +11698,141 @@ async fn test_sort_mode_toggle(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_sort_by_modified_time(cx: &mut gpui::TestAppContext) {
+    init_test(cx);
+
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        "/root",
+        json!({
+            "a_dir": {
+                "x.txt": "",
+                "y.txt": "",
+            },
+            "b_dir": {
+                "z.txt": "",
+            },
+            "a.txt": "",
+            "b.txt": "",
+            "c.txt": "",
+        }),
+    )
+    .await;
+    // FakeFs hands out increasing mtimes, so each touch makes the path the newest.
+    for path in [
+        "/root/c.txt",
+        "/root/a.txt",
+        "/root/b.txt",
+        "/root/a_dir",
+        "/root/b_dir",
+        "/root/a_dir/y.txt",
+        "/root/a_dir/x.txt",
+    ] {
+        fs.touch_path(path).await;
+    }
+
+    let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
+    let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace = window
+        .read_with(cx, |mw, _| mw.workspace().clone())
+        .unwrap();
+    let cx = &mut VisualTestContext::from_window(window.into(), cx);
+
+    cx.update(|_, cx| {
+        cx.update_global::<SettingsStore, _>(|store, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.project_panel.get_or_insert_default().sort_by =
+                    Some(settings::ProjectPanelSortBy::ModifiedTime);
+            });
+        });
+    });
+
+    let panel = workspace.update_in(cx, ProjectPanel::new);
+    cx.run_until_parked();
+    toggle_expand_dir(&panel, "root/a_dir", cx);
+
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..50, cx),
+        &[
+            "v root",
+            "    > b_dir",
+            "    v a_dir  <== selected",
+            "          x.txt",
+            "          y.txt",
+            "      b.txt",
+            "      a.txt",
+            "      c.txt",
+        ]
+    );
+
+    fs.touch_path("/root/c.txt").await;
+    fs.touch_path("/root/a_dir/y.txt").await;
+    cx.run_until_parked();
+
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..50, cx),
+        &[
+            "v root",
+            "    > b_dir",
+            "    v a_dir  <== selected",
+            "          y.txt",
+            "          x.txt",
+            "      c.txt",
+            "      b.txt",
+            "      a.txt",
+        ]
+    );
+
+    cx.update(|_, cx| {
+        cx.update_global::<SettingsStore, _>(|store, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.project_panel.get_or_insert_default().sort_mode =
+                    Some(settings::ProjectPanelSortMode::FilesFirst);
+            });
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..50, cx),
+        &[
+            "v root",
+            "      c.txt",
+            "      b.txt",
+            "      a.txt",
+            "    > b_dir",
+            "    v a_dir  <== selected",
+            "          y.txt",
+            "          x.txt",
+        ]
+    );
+
+    cx.update(|_, cx| {
+        cx.update_global::<SettingsStore, _>(|store, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.project_panel.get_or_insert_default().sort_by =
+                    Some(settings::ProjectPanelSortBy::Name);
+            });
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..50, cx),
+        &[
+            "v root",
+            "      a.txt",
+            "      b.txt",
+            "      c.txt",
+            "    v a_dir  <== selected",
+            "          x.txt",
+            "          y.txt",
+            "    > b_dir",
+        ]
+    );
+}
+
+#[gpui::test]
 async fn test_ensure_temporary_folding_when_creating_in_different_nested_dirs(
     cx: &mut gpui::TestAppContext,
 ) {

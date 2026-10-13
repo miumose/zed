@@ -13,7 +13,7 @@ use editor::{
     },
 };
 use file_icons::FileIcons;
-use fs::TrashId;
+use fs::{MTime, TrashId};
 use git;
 use git::status::GitSummary;
 use git_ui_core::file_diff_view::FileDiffView;
@@ -864,6 +864,9 @@ impl ProjectPanel {
                         this.update_visible_entries(None, false, false, window, cx);
                     }
                     if project_panel_settings.sort_order != new_settings.sort_order {
+                        this.update_visible_entries(None, false, false, window, cx);
+                    }
+                    if project_panel_settings.sort_by != new_settings.sort_by {
                         this.update_visible_entries(None, false, false, window, cx);
                     }
                     if project_panel_settings.sticky_scroll && !new_settings.sticky_scroll {
@@ -3088,7 +3091,22 @@ impl ProjectPanel {
 
         let sort_mode = ProjectPanelSettings::get_global(cx).sort_mode;
         let sort_order = ProjectPanelSettings::get_global(cx).sort_order;
-        sort_worktree_entries(&mut siblings, sort_mode, sort_order);
+        match ProjectPanelSettings::get_global(cx).sort_by {
+            settings::ProjectPanelSortBy::Name => {
+                sort_worktree_entries(&mut siblings, sort_mode, sort_order);
+            }
+            settings::ProjectPanelSortBy::ModifiedTime => {
+                siblings.sort_by(|lhs, rhs| {
+                    cmp_worktree_entries_by_modified_time(
+                        lhs,
+                        rhs,
+                        sort_mode,
+                        sort_order,
+                        &worktree_snapshot,
+                    )
+                });
+            }
+        }
         let sibling_entry_index = siblings
             .iter()
             .position(|sibling| sibling.id == latest_entry.id)?;
@@ -4557,6 +4575,7 @@ impl ProjectPanel {
         let hide_gitignore = settings.hide_gitignore;
         let sort_mode = settings.sort_mode;
         let sort_order = settings.sort_order;
+        let sort_by = settings.sort_by;
         let project = self.project.read(cx);
         let repo_snapshots = project.git_store().read(cx).display_repo_snapshots(cx);
 
@@ -4790,11 +4809,21 @@ impl ProjectPanel {
                             entry_iter.advance();
                         }
 
-                        par_sort_worktree_entries(
-                            &mut visible_worktree_entries,
-                            sort_mode,
-                            sort_order,
-                        );
+                        match sort_by {
+                            settings::ProjectPanelSortBy::Name => par_sort_worktree_entries(
+                                &mut visible_worktree_entries,
+                                sort_mode,
+                                sort_order,
+                            ),
+                            settings::ProjectPanelSortBy::ModifiedTime => {
+                                sort_worktree_entries_by_modified_time(
+                                    &mut visible_worktree_entries,
+                                    sort_mode,
+                                    sort_order,
+                                    &worktree_snapshot,
+                                )
+                            }
+                        }
                         new_state.visible_entries.push(VisibleEntriesForWorktree {
                             worktree_id,
                             entries: visible_worktree_entries,
@@ -8322,6 +8351,78 @@ pub fn par_sort_worktree_entries(
     order: settings::ProjectPanelSortOrder,
 ) {
     entries.par_sort_by(|lhs, rhs| cmp_worktree_entries(lhs, rhs, &mode, &order));
+}
+
+/// Orders entries so that, at each level of the tree, siblings are grouped by `mode`
+/// and then sorted by modification time, newest first. Entries that are not siblings
+/// are ordered by their sibling ancestors, so that children stay under their parents.
+fn cmp_worktree_entries_by_modified_time(
+    a: &Entry,
+    b: &Entry,
+    mode: settings::ProjectPanelSortMode,
+    order: settings::ProjectPanelSortOrder,
+    worktree_snapshot: &worktree::Snapshot,
+) -> cmp::Ordering {
+    let mut components_a = a.path.components();
+    let mut components_b = b.path.components();
+    let mut common_prefix_length = 0;
+    loop {
+        match (components_a.next(), components_b.next()) {
+            (Some(component_a), Some(component_b)) if component_a == component_b => {
+                common_prefix_length += 1;
+            }
+            (Some(_), Some(_)) => break,
+            (Some(_), None) => return cmp::Ordering::Greater,
+            (None, Some(_)) => return cmp::Ordering::Less,
+            (None, None) => return cmp_worktree_entries(a, b, &mode, &order),
+        }
+    }
+
+    let sibling_ancestor = |entry: &Entry| -> (Option<MTime>, bool, bool) {
+        let ancestor_depth = common_prefix_length + 1;
+        let is_leaf = entry.path.components().count() == ancestor_depth;
+        if is_leaf {
+            (entry.mtime, entry.is_file(), entry.id == NEW_ENTRY_ID)
+        } else {
+            let mtime = entry
+                .path
+                .ancestors()
+                .find(|ancestor| ancestor.components().count() == ancestor_depth)
+                .and_then(|ancestor| worktree_snapshot.entry_for_path(ancestor))
+                .and_then(|ancestor_entry| ancestor_entry.mtime);
+            (mtime, false, false)
+        }
+    };
+    let (mtime_a, a_is_file, a_is_new) = sibling_ancestor(a);
+    let (mtime_b, b_is_file, b_is_new) = sibling_ancestor(b);
+
+    let grouping = match mode {
+        settings::ProjectPanelSortMode::DirectoriesFirst => a_is_file.cmp(&b_is_file),
+        settings::ProjectPanelSortMode::FilesFirst => b_is_file.cmp(&a_is_file),
+        settings::ProjectPanelSortMode::Mixed => cmp::Ordering::Equal,
+    };
+
+    // The entry being created inherits its parent's mtime, so it is placed explicitly
+    // at the top of its group, where name sorting would also put it.
+    grouping
+        .then_with(|| b_is_new.cmp(&a_is_new))
+        .then_with(|| {
+            let timestamp_a = mtime_a.map(MTime::timestamp_for_user);
+            let timestamp_b = mtime_b.map(MTime::timestamp_for_user);
+            timestamp_b.cmp(&timestamp_a)
+        })
+        .then_with(|| cmp_worktree_entries(a, b, &mode, &order))
+}
+
+pub fn sort_worktree_entries_by_modified_time(
+    entries: &mut Vec<GitEntry>,
+    mode: settings::ProjectPanelSortMode,
+    order: settings::ProjectPanelSortOrder,
+    worktree_snapshot: &worktree::Snapshot,
+) {
+    entries.par_sort_by(|lhs, rhs| {
+        cmp_worktree_entries_by_modified_time(lhs, rhs, mode, order, worktree_snapshot)
+    });
 }
 
 fn git_status_indicator(git_status: GitSummary) -> Option<(&'static str, Color)> {
