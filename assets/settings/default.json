@@ -1115,6 +1115,7 @@
     // Default: main
     "fallback_branch_name": "main",
     // How to sort entries in the git panel.
+    // Can be `path`, `name`, or `modified_time` (most recently modified first).
     //
     // Default: path
     "sort_by": "path",

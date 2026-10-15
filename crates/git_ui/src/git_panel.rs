@@ -80,6 +80,7 @@ use settings::{
 };
 use smallvec::SmallVec;
 use std::cell::Cell;
+use std::cmp::Reverse;
 use std::future::Future;
 use std::ops::Range;
 use std::path::Path;
@@ -143,6 +144,8 @@ actions!(
         SetSortByPath,
         /// Sorts entries by name.
         SetSortByName,
+        /// Sorts entries by modification time, most recent first.
+        SetSortByModifiedTime,
         /// Disables grouping entries by status.
         SetGroupByNone,
         /// Groups entries by status.
@@ -438,6 +441,23 @@ fn git_panel_view_options_menu(
                                         ..state
                                     });
                                     window.dispatch_action(Box::new(SetSortByName), cx);
+                                }
+                            })
+                    })
+                    .item({
+                        let view_options_menu_state = view_options_menu_state.clone();
+                        ContextMenuEntry::new("Modified Time")
+                            .toggle(
+                                IconPosition::End,
+                                state.sort_by == GitPanelSortBy::ModifiedTime,
+                            )
+                            .handler(move |window, cx| {
+                                if !state.tree_view {
+                                    view_options_menu_state.set(GitPanelViewOptionsMenuState {
+                                        sort_by: GitPanelSortBy::ModifiedTime,
+                                        ..state
+                                    });
+                                    window.dispatch_action(Box::new(SetSortByModifiedTime), cx);
                                 }
                             })
                     })
@@ -1461,6 +1481,30 @@ impl GitPanel {
                     | GitStoreEvent::DiffBaseChanged(_) => {}
                 },
             )
+            .detach();
+
+            // Saving an already-changed file does not always change its git
+            // status, so re-sort when the mtime of a listed file changes.
+            cx.subscribe_in(&project, window, |this, _project, event, window, cx| {
+                if let project::Event::WorktreeUpdatedEntries(worktree_id, changes) = event
+                    && GitPanelSettings::get_global(cx).sort_by == GitPanelSortBy::ModifiedTime
+                    && matches!(this.view_mode, GitPanelViewMode::Flat)
+                    && let Some(repo) = this.active_repository.as_ref()
+                {
+                    let repo = repo.read(cx);
+                    let changed_file_updated = changes.iter().any(|(path, _, _)| {
+                        let project_path = ProjectPath {
+                            worktree_id: *worktree_id,
+                            path: path.clone(),
+                        };
+                        repo.project_path_to_repo_path(&project_path, cx)
+                            .is_some_and(|repo_path| repo.status_for_path(&repo_path).is_some())
+                    });
+                    if changed_file_updated {
+                        this.schedule_visible_entries_update(window, cx);
+                    }
+                }
+            })
             .detach();
 
             let mut this = Self {
@@ -5114,6 +5158,24 @@ impl GitPanel {
         }
     }
 
+    fn set_sort_by_modified_time(
+        &mut self,
+        _: &SetSortByModifiedTime,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(workspace) = self.workspace.upgrade() {
+            let workspace = workspace.read(cx);
+            let fs = workspace.app_state().fs.clone();
+            cx.update_global::<SettingsStore, _>(|store, _cx| {
+                store.update_settings_file(fs, move |settings, _cx| {
+                    settings.git_panel.get_or_insert_default().sort_by =
+                        Some(GitPanelSortBy::ModifiedTime);
+                });
+            });
+        }
+    }
+
     fn set_group_by_none(&mut self, _: &SetGroupByNone, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(workspace) = self.workspace.upgrade() {
             let workspace = workspace.read(cx);
@@ -5324,7 +5386,6 @@ impl GitPanel {
     }
 
     fn schedule_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let handle = cx.entity().downgrade();
         let new_active_repository = self.project.read(cx).active_repository(cx);
         let active_repository_changed = self.active_repository.as_ref().map(Entity::entity_id)
             != new_active_repository.as_ref().map(Entity::entity_id);
@@ -5351,6 +5412,11 @@ impl GitPanel {
         if self.active_tab == GitPanelTab::History {
             self.load_commit_history(cx);
         }
+        self.schedule_visible_entries_update(window, cx);
+    }
+
+    fn schedule_visible_entries_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let handle = cx.entity().downgrade();
         self.update_visible_entries_task = cx.spawn_in(window, async move |_, cx| {
             cx.background_executor().timer(UPDATE_DEBOUNCE).await;
             if let Some(git_panel) = handle.upgrade() {
@@ -5653,6 +5719,21 @@ impl GitPanel {
                         .file_name()
                         .cmp(&b.repo_path.file_name())
                         .then_with(|| a.repo_path.cmp(&b.repo_path))
+                }),
+                // Deleted files have no mtime, so they go last.
+                GitPanelSortBy::ModifiedTime => entries.sort_by_cached_key(|entry| {
+                    let modified_time = repo
+                        .repo_path_to_project_path(&entry.repo_path, cx)
+                        .and_then(|project_path| {
+                            self.project.read(cx).entry_for_path(&project_path, cx)
+                        })
+                        .and_then(|worktree_entry| worktree_entry.mtime)
+                        .map(|mtime| mtime.timestamp_for_user());
+                    (
+                        modified_time.is_none(),
+                        Reverse(modified_time),
+                        entry.repo_path.clone(),
+                    )
                 }),
             };
 
@@ -9392,6 +9473,7 @@ impl Render for GitPanel {
             })
             .on_action(cx.listener(Self::set_sort_by_path))
             .on_action(cx.listener(Self::set_sort_by_name))
+            .on_action(cx.listener(Self::set_sort_by_modified_time))
             .on_action(cx.listener(Self::set_group_by_none))
             .on_action(cx.listener(Self::set_group_by_status))
             .on_action(cx.listener(Self::set_group_by_staging))
@@ -12341,6 +12423,122 @@ mod tests {
                 Status(GitStatusEntry { staging: StageStatus::Staged, .. }),
                 Status(GitStatusEntry { staging: StageStatus::Staged, .. }),
             ],
+        );
+    }
+
+    #[gpui::test]
+    async fn test_sort_by_modified_time(cx: &mut TestAppContext) {
+        init_test(cx);
+        cx.update(|cx| {
+            cx.update_global::<SettingsStore, _>(|store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    let git_panel = settings.git_panel.get_or_insert_default();
+                    git_panel.sort_by = Some(GitPanelSortBy::ModifiedTime);
+                    git_panel.group_by = Some(GitPanelGroupBy::None);
+                });
+            });
+        });
+
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(
+            "/root",
+            json!({
+                "project": {
+                    ".git": {},
+                    "a.rs": "a",
+                    "src": {
+                        "b.rs": "b",
+                        "c.rs": "c",
+                    },
+                    "unchanged.rs": "unchanged",
+                }
+            }),
+        )
+        .await;
+        fs.set_status_for_repo(
+            Path::new(path!("/root/project/.git")),
+            &[
+                ("a.rs", StatusCode::Modified.worktree()),
+                ("src/b.rs", StatusCode::Modified.worktree()),
+                ("src/c.rs", FileStatus::Untracked),
+                ("deleted.rs", StatusCode::Deleted.worktree()),
+            ],
+        );
+        // FakeFs hands out increasing mtimes, so each touch makes the path the newest.
+        for path in [
+            path!("/root/project/src/b.rs"),
+            path!("/root/project/src/c.rs"),
+            path!("/root/project/a.rs"),
+            path!("/root/project/unchanged.rs"),
+        ] {
+            fs.touch_path(path).await;
+        }
+
+        let project = Project::test(fs.clone(), [Path::new(path!("/root/project"))], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window_handle
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+        let cx = &mut VisualTestContext::from_window(window_handle.into(), cx);
+
+        cx.read(|cx| {
+            project
+                .read(cx)
+                .worktrees(cx)
+                .next()
+                .unwrap()
+                .read(cx)
+                .as_local()
+                .unwrap()
+                .scan_complete()
+        })
+        .await;
+        cx.executor().run_until_parked();
+
+        let panel = workspace.update_in(cx, GitPanel::new);
+        cx.executor().advance_clock(2 * UPDATE_DEBOUNCE);
+        cx.executor().run_until_parked();
+
+        let status_paths = |panel: &Entity<GitPanel>, cx: &mut VisualTestContext| {
+            panel.read_with(cx, |panel, _| {
+                panel
+                    .entries
+                    .iter()
+                    .filter_map(|entry| {
+                        Some(entry.status_entry()?.repo_path.as_unix_str().to_string())
+                    })
+                    .collect::<Vec<_>>()
+            })
+        };
+
+        // Deleted files have no mtime and go last; unchanged files are not listed.
+        assert_eq!(
+            status_paths(&panel, cx),
+            ["a.rs", "src/c.rs", "src/b.rs", "deleted.rs"]
+        );
+
+        // Saving a file whose git status stays the same still moves it to the top.
+        fs.touch_path(path!("/root/project/src/b.rs")).await;
+        cx.executor().run_until_parked();
+        cx.executor().advance_clock(2 * UPDATE_DEBOUNCE);
+        cx.executor().run_until_parked();
+        assert_eq!(
+            status_paths(&panel, cx),
+            ["src/b.rs", "a.rs", "src/c.rs", "deleted.rs"]
+        );
+
+        cx.update(|_, cx| {
+            cx.update_global::<SettingsStore, _>(|store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.git_panel.get_or_insert_default().sort_by = Some(GitPanelSortBy::Path);
+                });
+            });
+        });
+        cx.executor().run_until_parked();
+        assert_eq!(
+            status_paths(&panel, cx),
+            ["a.rs", "deleted.rs", "src/b.rs", "src/c.rs"]
         );
     }
 

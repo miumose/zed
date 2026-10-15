@@ -887,6 +887,8 @@ pub enum GitPanelSortBy {
     #[default]
     Path,
     Name,
+    /// Most recently modified files first.
+    ModifiedTime,
 }
 
 #[derive(

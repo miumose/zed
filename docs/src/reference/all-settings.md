@@ -6163,7 +6163,7 @@ See the [debugger page](../debugger.md) for more information about debugging sup
 - `file_icons`: Whether to show file icons in the git panel
 - `folder_indicator`: What to show for directories in the git panel. Can be `icon`, `chevron`, or `both`
 - `fallback_branch_name`: What branch name to use if `init.defaultBranch` is not set
-- `sort_by`: How to sort entries in the git panel. Can be `path` or `name`
+- `sort_by`: How to sort entries in the git panel. Can be `path`, `name`, or `modified_time` (most recently modified first)
 - `group_by`: How to group entries in the git panel. Can be `none` or `status`
 - `collapse_untracked_diff`: Whether to collapse untracked files in the diff panel
 - `tree_view`: Whether to show entries in tree or flat view in the panel

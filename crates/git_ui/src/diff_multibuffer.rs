@@ -1016,7 +1016,9 @@ fn project_diff_sort_path(
         tree_sort_path(repo_path)
     } else {
         match sort_by {
-            GitPanelSortBy::Path => repo_path.into_arc(),
+            // Excerpt keys must stay stable while files are edited, so the diff
+            // view keeps path order rather than reordering on every save.
+            GitPanelSortBy::Path | GitPanelSortBy::ModifiedTime => repo_path.into_arc(),
             GitPanelSortBy::Name => name_sort_path(repo_path),
         }
     }
