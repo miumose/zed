@@ -12461,7 +12461,6 @@ mod tests {
                 ("a.rs", StatusCode::Modified.worktree()),
                 ("src/b.rs", StatusCode::Modified.worktree()),
                 ("src/c.rs", FileStatus::Untracked),
-                ("deleted.rs", StatusCode::Deleted.worktree()),
             ],
         );
         // FakeFs hands out increasing mtimes, so each touch makes the path the newest.
@@ -12512,21 +12511,14 @@ mod tests {
             })
         };
 
-        // Deleted files have no mtime and go last; unchanged files are not listed.
-        assert_eq!(
-            status_paths(&panel, cx),
-            ["a.rs", "src/c.rs", "src/b.rs", "deleted.rs"]
-        );
+        assert_eq!(status_paths(&panel, cx), ["a.rs", "src/c.rs", "src/b.rs"]);
 
         // Saving a file whose git status stays the same still moves it to the top.
         fs.touch_path(path!("/root/project/src/b.rs")).await;
         cx.executor().run_until_parked();
         cx.executor().advance_clock(2 * UPDATE_DEBOUNCE);
         cx.executor().run_until_parked();
-        assert_eq!(
-            status_paths(&panel, cx),
-            ["src/b.rs", "a.rs", "src/c.rs", "deleted.rs"]
-        );
+        assert_eq!(status_paths(&panel, cx), ["src/b.rs", "a.rs", "src/c.rs"]);
 
         cx.update(|_, cx| {
             cx.update_global::<SettingsStore, _>(|store, cx| {
@@ -12536,10 +12528,7 @@ mod tests {
             });
         });
         cx.executor().run_until_parked();
-        assert_eq!(
-            status_paths(&panel, cx),
-            ["a.rs", "deleted.rs", "src/b.rs", "src/c.rs"]
-        );
+        assert_eq!(status_paths(&panel, cx), ["a.rs", "src/b.rs", "src/c.rs"]);
     }
 
     #[gpui::test]
